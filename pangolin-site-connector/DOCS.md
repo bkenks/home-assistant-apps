@@ -76,13 +76,13 @@ Each level includes messages from more severe levels. The default is
 
 The site connector has fewer log levels, so the app maps them as follows:
 
-| App level         | Site connector level |
-| ----------------- | -------------------- |
-| `trace`, `debug`  | `DEBUG`    |
-| `info`, `notice`  | `INFO`     |
-| `warning`         | `WARN`     |
-| `error`           | `ERROR`    |
-| `fatal`           | `FATAL`    |
+| App level        | Site connector level |
+| ---------------- | -------------------- |
+| `trace`, `debug` | `DEBUG`              |
+| `info`, `notice` | `INFO`               |
+| `warning`        | `WARN`               |
+| `error`          | `ERROR`              |
+| `fatal`          | `FATAL`              |
 
 ## Home Assistant proxy setup
 
