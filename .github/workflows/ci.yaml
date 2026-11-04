@@ -6,36 +6,29 @@ name: CI
 # repository that holds both the store manifest and the app:
 # - The app linter runs without community checks, since those require
 #   `version: dev` and this repository ships real versions.
-# - Build args from build.yaml are passed to the build.
 # - A version check fails the PR when image files change without a bump.
 
 # yamllint disable-line rule:truthy
 on:
   pull_request:
-    types:
-      - opened
-      - reopened
-      - synchronize
   workflow_dispatch:
 
-permissions: {}
+permissions:
+  contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   information:
     name: Gather app information
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     outputs:
       architectures: ${{ steps.information.outputs.architectures }}
       build: ${{ steps.information.outputs.build }}
       description: ${{ steps.information.outputs.description }}
       name: ${{ steps.information.outputs.name }}
-      slug: ${{ steps.information.outputs.slug }}
       target: ${{ steps.information.outputs.target }}
       version: ${{ steps.information.outputs.version }}
     steps:
@@ -53,8 +46,6 @@ jobs:
     needs:
       - information
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - name: ⤵️ Check out code from GitHub
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -63,14 +54,13 @@ jobs:
           persist-credentials: false
       - name: 🔎 Require a version bump when the image changes
         env:
-          BASE_REF: ${{ github.base_ref }}
           TARGET: ${{ needs.information.outputs.target }}
           VERSION: ${{ needs.information.outputs.version }}
         run: |
           # Docs and images are read from the repository, not the image,
           # so changing only those does not need a new version.
           changed=$(
-            git diff --name-only "origin/${BASE_REF}...HEAD" -- "${TARGET}" \
+            git diff --name-only "origin/${GITHUB_BASE_REF}...HEAD" -- "${TARGET}" \
               | grep -vE '\.(md|png)$' || true
           )
           if [[ -z "${changed}" ]]; then
@@ -79,7 +69,7 @@ jobs:
           fi
 
           base_version=$(
-            git show "origin/${BASE_REF}:${TARGET}/config.yaml" 2>/dev/null \
+            git show "origin/${GITHUB_BASE_REF}:${TARGET}/config.yaml" 2>/dev/null \
               | yq --no-colors eval '.version' - || true
           )
           if [[ "${base_version}" == "${VERSION}" ]]; then
@@ -95,8 +85,6 @@ jobs:
     needs:
       - information
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - name: ⤵️ Check out code from GitHub
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -113,8 +101,6 @@ jobs:
     needs:
       - information
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - name: ⤵️ Check out code from GitHub
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -125,32 +111,9 @@ jobs:
         with:
           dockerfile: "./${{ needs.information.outputs.target }}/Dockerfile"
 
-  lint-json:
-    name: JSON Lint
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: ⤵️ Check out code from GitHub
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: 🚀 Run JQ
-        run: |
-          shopt -s globstar nullglob
-          for file in **/*.json; do
-            if ! jq '.' "$file" > /dev/null 2>&1; then
-              echo "::error file=${file}::Invalid JSON in ${file}"
-              jq '.' "$file"
-              exit 1
-            fi
-          done
-
   lint-shellcheck:
     name: Shellcheck
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - name: ⤵️ Check out code from GitHub
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -164,8 +127,6 @@ jobs:
   lint-yamllint:
     name: YAMLLint
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - name: ⤵️ Check out code from GitHub
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -174,11 +135,10 @@ jobs:
       - name: 🚀 Run YAMLLint
         uses: frenck/action-yamllint@34b4bbcaeabedcfefad6adea8c5bbc42af0e2d47 # v1.5.0
 
+  # Also catches invalid JSON, since Prettier fails to parse it.
   lint-prettier:
     name: Prettier
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - name: ⤵️ Check out code from GitHub
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -187,9 +147,7 @@ jobs:
       - name: 🚀 Run Prettier
         uses: creyD/prettier_action@8c18391fdc98ed0d884c6345f03975edac71b8f0 # v4.6
         with:
-          prettier_options: --check **/*.{json,js,md,yaml}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          prettier_options: --check **/*.{json,md,yaml}
 
   lint-zizmor:
     name: zizmor
@@ -209,16 +167,7 @@ jobs:
     name: Build ${{ matrix.architecture }}
     needs:
       - information
-      - lint-app
-      - lint-hadolint
-      - lint-json
-      - lint-prettier
-      - lint-shellcheck
-      - lint-yamllint
-      - lint-zizmor
     runs-on: ${{ matrix.architecture == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
-    permissions:
-      contents: read
     strategy:
       matrix:
         architecture: ${{ fromJson(needs.information.outputs.architectures) }}
@@ -227,50 +176,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: 🏗 Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-      - name: ℹ️ Compose build flags
-        id: flags
-        env:
-          ARCHITECTURE: ${{ matrix.architecture }}
-          BUILD_FILE: ${{ needs.information.outputs.build }}
-        run: |
-          echo "date=$(date +"%Y-%m-%dT%H:%M:%SZ")" >> "$GITHUB_OUTPUT"
-          from=$(yq --no-colors eval ".build_from.${ARCHITECTURE}" "${BUILD_FILE}")
-          echo "from=${from}" >> "$GITHUB_OUTPUT"
-
-          # Extra build args from build.yaml (e.g. PANGOLIN_CLI_VERSION)
-          {
-            echo "args<<EOF"
-            yq --no-colors eval \
-              '.args // {} | to_entries | .[] | .key + "=" + (.value | tostring)' \
-              "${BUILD_FILE}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-          if [[ "${ARCHITECTURE}" = "amd64" ]]; then
-            echo "platform=linux/amd64" >> "$GITHUB_OUTPUT"
-          elif [[ "${ARCHITECTURE}" = "aarch64" ]]; then
-            echo "platform=linux/arm64/v8" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error ::Could not determine platform for architecture ${ARCHITECTURE}"
-            exit 1
-          fi
       - name: 🚀 Build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: ./.github/actions/build-app # zizmor: ignore[self-repository] - actionlint does not support $/ yet
         with:
-          push: false
-          # zizmor: ignore[template-injection] - path input to action, not shell-executed
-          context: ${{ needs.information.outputs.target }}
-          file: ${{ needs.information.outputs.target }}/Dockerfile
-          platforms: ${{ steps.flags.outputs.platform }}
-          build-args: |
-            BUILD_ARCH=${{ matrix.architecture }}
-            BUILD_DATE=${{ steps.flags.outputs.date }}
-            BUILD_DESCRIPTION=${{ needs.information.outputs.description }}
-            BUILD_FROM=${{ steps.flags.outputs.from }}
-            BUILD_NAME=${{ needs.information.outputs.name }}
-            BUILD_REF=${{ github.sha }}
-            BUILD_REPOSITORY=${{ github.repository }}
-            BUILD_VERSION=${{ needs.information.outputs.version }}
-            ${{ steps.flags.outputs.args }}
+          architecture: ${{ matrix.architecture }}
+          build-file: ${{ needs.information.outputs.build }}
+          target: ${{ needs.information.outputs.target }}
+          name: ${{ needs.information.outputs.name }}
+          description: ${{ needs.information.outputs.description }}
+          version: ${{ needs.information.outputs.version }}
