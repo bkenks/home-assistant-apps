@@ -1,0 +1,162 @@
+---
+name: Deploy
+
+# Builds and pushes prebuilt images to GHCR when a merged pull request
+# bumps the app version in config.yaml. Images are tagged
+# ghcr.io/<owner>/<slug>/<arch>:<version>, matching `image:` in
+# config.yaml. Then creates a GitHub release named <slug>-<version>
+# with the matching CHANGELOG.md section as notes.
+#
+# Based on hassio-addons/workflows app-deploy.yaml (v3.0.1), without the
+# dispatch to separate repositories.
+
+# yamllint disable-line rule:truthy
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  information:
+    name: ℹ️ Gather app information
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      architectures: ${{ steps.information.outputs.architectures }}
+      build: ${{ steps.information.outputs.build }}
+      description: ${{ steps.information.outputs.description }}
+      exists: ${{ steps.exists.outputs.exists }}
+      image: ${{ steps.exists.outputs.image }}
+      name: ${{ steps.information.outputs.name }}
+      slug: ${{ steps.information.outputs.slug }}
+      target: ${{ steps.information.outputs.target }}
+      version: ${{ steps.information.outputs.version }}
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🚀 Run app information action
+        id: information
+        uses: frenck/action-addon-information@ce1377e9851cf569c29329e65fb2c57e67ca0f69 # v1.4.2
+      - name: 🏗 Login to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 🔎 Check if this version is already published
+        id: exists
+        env:
+          ARCHITECTURES: ${{ steps.information.outputs.architectures }}
+          SLUG: ${{ steps.information.outputs.slug }}
+          VERSION: ${{ steps.information.outputs.version }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${SLUG}"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+
+          # Published only if every architecture has this version, so a
+          # partly failed deploy is retried on the next run.
+          exists=true
+          for arch in $(echo "${ARCHITECTURES}" | jq -r '.[]'); do
+            if docker buildx imagetools inspect "${image}/${arch}:${VERSION}" > /dev/null 2>&1; then
+              echo "Found ${image}/${arch}:${VERSION}"
+            else
+              echo "Missing ${image}/${arch}:${VERSION}"
+              exists=false
+            fi
+          done
+          echo "exists=${exists}" >> "$GITHUB_OUTPUT"
+          if [[ "${exists}" == "true" ]]; then
+            echo "::notice ::Version ${VERSION} is already published, skipping deploy."
+          fi
+
+  deploy:
+    name: 👷 Build & Deploy ${{ matrix.architecture }}
+    needs: information
+    if: needs.information.outputs.exists != 'true'
+    runs-on: ${{ matrix.architecture == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        architecture: ${{ fromJson(needs.information.outputs.architectures) }}
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🏗 Login to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 🚀 Build and push
+        uses: ./.github/actions/build-app # zizmor: ignore[self-repository] - actionlint does not support $/ yet
+        with:
+          architecture: ${{ matrix.architecture }}
+          build-file: ${{ needs.information.outputs.build }}
+          target: ${{ needs.information.outputs.target }}
+          name: ${{ needs.information.outputs.name }}
+          description: ${{ needs.information.outputs.description }}
+          version: ${{ needs.information.outputs.version }}
+          push: "true"
+          tags: |
+            ${{ needs.information.outputs.image }}/${{ matrix.architecture }}:${{ needs.information.outputs.version }}
+            ${{ needs.information.outputs.image }}/${{ matrix.architecture }}:latest
+
+  release:
+    name: 📢 Create GitHub release
+    needs:
+      - information
+      - deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🚀 Create release from CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SLUG: ${{ needs.information.outputs.slug }}
+          TARGET: ${{ needs.information.outputs.target }}
+          VERSION: ${{ needs.information.outputs.version }}
+        run: |
+          tag="${SLUG}-${VERSION}"
+          if gh release view "${tag}" > /dev/null 2>&1; then
+            echo "::notice ::Release ${tag} already exists."
+            exit 0
+          fi
+
+          # Notes are the "## [VERSION]" section of the CHANGELOG
+          notes=$(
+            awk -v version="${VERSION}" '
+              $0 ~ "^## \\[" version "\\]" { found = 1; next }
+              found && /^## \[/ { exit }
+              found && /^\[[^]]+\]: / { exit }
+              found { print }
+            ' "${TARGET}/CHANGELOG.md"
+          )
+          if [[ -z "${notes//[[:space:]]/}" ]]; then
+            notes="See ${TARGET}/CHANGELOG.md."
+          fi
+
+          gh release create "${tag}" \
+            --target "${GITHUB_SHA}" \
+            --title "${SLUG} ${VERSION}" \
+            --notes "${notes}"

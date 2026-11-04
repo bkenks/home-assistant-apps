@@ -1,0 +1,187 @@
+---
+name: CI
+
+# Lints and test-builds the app on every pull request. Based on
+# hassio-addons/workflows app-ci.yaml (v3.0.1), adapted for a single
+# repository that holds both the store manifest and the app:
+# - The app linter runs without community checks, since those require
+#   `version: dev` and this repository ships real versions.
+# - A version check fails the PR when image files change without a bump.
+
+# yamllint disable-line rule:truthy
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  information:
+    name: Gather app information
+    runs-on: ubuntu-latest
+    outputs:
+      architectures: ${{ steps.information.outputs.architectures }}
+      build: ${{ steps.information.outputs.build }}
+      description: ${{ steps.information.outputs.description }}
+      name: ${{ steps.information.outputs.name }}
+      target: ${{ steps.information.outputs.target }}
+      version: ${{ steps.information.outputs.version }}
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🚀 Run app information action
+        id: information
+        uses: frenck/action-addon-information@ce1377e9851cf569c29329e65fb2c57e67ca0f69 # v1.4.2
+
+  version-check:
+    name: Version bump
+    if: github.event_name == 'pull_request'
+    needs:
+      - information
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 🔎 Require a version bump when the image changes
+        env:
+          TARGET: ${{ needs.information.outputs.target }}
+          VERSION: ${{ needs.information.outputs.version }}
+        run: |
+          # Docs and images are read from the repository, not the image,
+          # so changing only those does not need a new version.
+          changed=$(
+            git diff --name-only "origin/${GITHUB_BASE_REF}...HEAD" -- "${TARGET}" \
+              | grep -vE '\.(md|png)$' || true
+          )
+          if [[ -z "${changed}" ]]; then
+            echo "No image changes, no version bump needed."
+            exit 0
+          fi
+
+          base_version=$(
+            git show "origin/${GITHUB_BASE_REF}:${TARGET}/config.yaml" 2>/dev/null \
+              | yq --no-colors eval '.version' - || true
+          )
+          if [[ "${base_version}" == "${VERSION}" ]]; then
+            echo "::error file=${TARGET}/config.yaml::Image files changed but version is still ${VERSION}. Bump 'version' and add a CHANGELOG entry."
+            echo "Changed files:"
+            echo "${changed}"
+            exit 1
+          fi
+          echo "Version bumped: ${base_version:-none} -> ${VERSION}"
+
+  lint-app:
+    name: Lint App
+    needs:
+      - information
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🚀 Run App Lint
+        uses: frenck/action-app-linter@b9cfd1bc62ba60d2c4fc96317b5f7ada5923f4a7 # v2.21.1
+        with:
+          community: false
+          path: "./${{ needs.information.outputs.target }}"
+
+  lint-hadolint:
+    name: Hadolint
+    needs:
+      - information
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🚀 Run Hadolint
+        uses: brpaz/hadolint-action@c27bd9edc1e95eed30474db8f295ff5807ebca14 # v1.5.0
+        with:
+          dockerfile: "./${{ needs.information.outputs.target }}/Dockerfile"
+
+  lint-shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🚀 Run Shellcheck
+        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # 2.0.0
+        env:
+          SHELLCHECK_OPTS: -s bash
+
+  lint-yamllint:
+    name: YAMLLint
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🚀 Run YAMLLint
+        uses: frenck/action-yamllint@34b4bbcaeabedcfefad6adea8c5bbc42af0e2d47 # v1.5.0
+
+  # Also catches invalid JSON, since Prettier fails to parse it.
+  lint-prettier:
+    name: Prettier
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🚀 Run Prettier
+        uses: creyD/prettier_action@8c18391fdc98ed0d884c6345f03975edac71b8f0 # v4.6
+        with:
+          prettier_options: --check **/*.{json,md,yaml}
+
+  lint-zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🚀 Run zizmor
+        uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
+
+  build:
+    name: Build ${{ matrix.architecture }}
+    needs:
+      - information
+    runs-on: ${{ matrix.architecture == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    strategy:
+      matrix:
+        architecture: ${{ fromJson(needs.information.outputs.architectures) }}
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🚀 Build
+        uses: ./.github/actions/build-app # zizmor: ignore[self-repository] - actionlint does not support $/ yet
+        with:
+          architecture: ${{ matrix.architecture }}
+          build-file: ${{ needs.information.outputs.build }}
+          target: ${{ needs.information.outputs.target }}
+          name: ${{ needs.information.outputs.name }}
+          description: ${{ needs.information.outputs.description }}
+          version: ${{ needs.information.outputs.version }}
