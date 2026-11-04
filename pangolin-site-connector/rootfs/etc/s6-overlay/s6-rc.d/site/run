@@ -1,0 +1,29 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# bkenks Home Assistant App: Pangolin Site Connector
+# Runs site connector
+# ==============================================================================
+declare site_log_level
+
+# Map Home Assistant log levels to pangolin cli log levels
+case "$(bashio::config 'log_level')" in
+    trace|debug) site_log_level="DEBUG" ;;
+    info|notice) site_log_level="INFO" ;;
+    warning)     site_log_level="WARN" ;;
+    error)       site_log_level="ERROR" ;;
+    fatal)       site_log_level="FATAL" ;;
+    *)           site_log_level="INFO" ;;
+esac
+
+PANGOLIN_ENDPOINT=$(bashio::config 'endpoint')
+SITE_ID=$(bashio::config 'id')
+SITE_SECRET=$(bashio::config 'secret')
+export PANGOLIN_ENDPOINT SITE_ID SITE_SECRET
+
+CONFIG_FILE="/data/site-config.json"
+export CONFIG_FILE
+
+bashio::log.info "Starting site ${site_log_level,,} logging..."
+
+exec pangolin up site --log-level "${site_log_level}"

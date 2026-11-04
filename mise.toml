@@ -1,0 +1,4 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[tools]
+vendir = "0.46.2"

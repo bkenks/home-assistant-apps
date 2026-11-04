@@ -1,0 +1,16 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# bkenks Home Assistant App: Pangolin Site Connector
+# Validates the configuration before site connector starts
+# ==============================================================================
+
+bashio::config.require 'endpoint' "site connector needs the URL of your Pangolin server."
+bashio::config.require 'id' "Copy the site ID from the Pangolin dashboard."
+bashio::config.require 'secret' "Copy the site secret from the Pangolin dashboard."
+
+if bashio::config.equals 'endpoint' 'https://pangolin.example.com'; then
+    bashio::exit.nok "The 'endpoint' option is still the example URL."
+fi
+
+bashio::log.info "Configuration is valid."

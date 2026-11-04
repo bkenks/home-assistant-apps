@@ -1,0 +1,16 @@
+apiVersion: vendir.k14s.io/v1alpha1
+kind: Config
+directories:
+  - path: .vendir/hassio-addons/example
+    contents:
+      - path: manifest
+        git:
+          url: https://github.com/hassio-addons/repository.git
+          ref: master
+          depth: 0
+        newRootPath: example
+      - path: app
+        git:
+          url: https://github.com/hassio-addons/app-example.git
+          ref: v14.0.1
+          depth: 0

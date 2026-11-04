@@ -1,0 +1,14 @@
+---
+configuration:
+  endpoint:
+    name: Endpoint
+    description: The Pangolin server url to connect to.
+  id:
+    name: ID
+    description: The site connector ID.
+  secret:
+    name: Secret
+    description: The site connector secret.
+  log_level:
+    name: Log level
+    description: The amount of logging the app should do.

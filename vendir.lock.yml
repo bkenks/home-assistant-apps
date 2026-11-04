@@ -1,0 +1,15 @@
+apiVersion: vendir.k14s.io/v1alpha1
+directories:
+- contents:
+  - git:
+      commitTitle: ':tada: Release of app AdGuard Home 6.3.2'
+      sha: e2b12faeaea8f09a6b8922701407e5502487da76
+    path: manifest
+  - git:
+      commitTitle: "\U0001F41B Fix quote fetching under Bashio inherit_errexit (#237)"
+      sha: 5816dc18bc335af5f01f2847bf792c9900eb91ae
+      tags:
+      - v14.0.1
+    path: app
+  path: .vendir/hassio-addons/example
+kind: LockConfig
