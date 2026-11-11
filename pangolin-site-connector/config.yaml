@@ -1,6 +1,6 @@
 ---
 name: Pangolin Site Connector
-version: 0.2.0
+version: 0.3.0
 slug: pangolin-site-connector
 description: Connects Home Assistant to Pangolin to provide safe access outside your home network.
 url: https://github.com/bkenks/home-assistant-apps
