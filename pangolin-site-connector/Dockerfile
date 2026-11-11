@@ -3,7 +3,7 @@ ARG BUILD_FROM=ghcr.io/hassio-addons/base:21.0.10
 FROM ${BUILD_FROM}
 
 ARG BUILD_ARCH
-ARG PANGOLIN_CLI_VERSION=0.20.0
+ARG PANGOLIN_CLI_VERSION=0.21.0
 # Stops the embedded self-updater from overwriting the binary at runtime
 ENV NEWT_SYSTEM_SUBSTRATE=CONTAINER
 
